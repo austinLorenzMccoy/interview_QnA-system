@@ -1,0 +1,12 @@
+langchain
+langchain_groq
+langchain_community
+faiss-cpu
+python-dotenv
+fastapi
+uvicorn
+pandas
+numpy==1.24.3
+
+
+
