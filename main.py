@@ -1,3 +1,5 @@
+# main.py
+
 # Step 1: Environment Setup
 import os
 import time
@@ -6,6 +8,7 @@ import asyncio
 from dotenv import load_dotenv
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # Load environment variables from .env file
@@ -21,12 +24,13 @@ os.environ['GROQ_API_KEY'] = os.getenv('GROQ_API_KEY')
 # Import necessary modules from LangChain and related libraries
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import WebBaseLoader
-from langchain.embeddings import OllamaEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings  # Ensure this is correct
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.prompts import ChatPromptTemplate  # Ensure this is correct
 from langchain.chains import create_retrieval_chain
 from langchain_community.vectorstores import FAISS
+
 
 # Load the Groq API key from the environment
 groq_api_key = os.getenv('GROQ_API_KEY')
@@ -130,6 +134,16 @@ async def get_answer_endpoint(query: Query):
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
         raise HTTPException(status_code=500, detail="An error occurred while processing your request")
+
+# Add root endpoint
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the Interview Q&A API! Use the /get_answer endpoint to ask questions."}
+
+# Add favicon handling
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("path/to/your/favicon.ico")  # Update this path
 
 # Step 8: Main Execution
 if __name__ == "__main__":
