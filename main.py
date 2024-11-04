@@ -1,6 +1,3 @@
-# main.py
-
-# Step 1: Environment Setup
 import os
 import time
 import logging
@@ -8,8 +5,8 @@ import asyncio
 from dotenv import load_dotenv
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from fastapi.responses import FileResponse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,13 +21,11 @@ os.environ['GROQ_API_KEY'] = os.getenv('GROQ_API_KEY')
 # Import necessary modules from LangChain and related libraries
 from langchain_groq import ChatGroq
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_community.embeddings import OllamaEmbeddings  # Ensure this is correct
+from langchain_ollama import OllamaEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.prompts import ChatPromptTemplate  # Ensure this is correct
-from langchain.chains import create_retrieval_chain
+from langchain.chains import RetrievalQA
+from langchain.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import FAISS
-
 
 # Load the Groq API key from the environment
 groq_api_key = os.getenv('GROQ_API_KEY')
@@ -61,7 +56,7 @@ def load_and_prepare_data(file_path):
 def generate_embeddings(text_chunks):
     try:
         embedding_model = OllamaEmbeddings(model="llama3.2")
-        embeddings = [embedding_model.embed(chunk) for chunk in text_chunks]
+        embeddings = embedding_model.embed_documents(text_chunks)
         logger.info(f"Generated {len(embeddings)} embeddings")
         return embeddings
     except Exception as e:
@@ -71,7 +66,8 @@ def generate_embeddings(text_chunks):
 # Step 4: Create FAISS Vector Store
 def create_vector_store(chunks, embeddings):
     try:
-        vectorstore = FAISS.from_documents(chunks, embeddings)
+        text_embeddings = list(zip(chunks, embeddings))
+        vectorstore = FAISS.from_embeddings(text_embeddings, OllamaEmbeddings(model="llama3.2"))
         logger.info("Created FAISS vector store")
         return vectorstore
     except Exception as e:
@@ -84,7 +80,7 @@ def create_rag_chain(llm, vectorstore):
         """
         For the following interview question, provide a comprehensive response based on the context provided:
 
-        Question: {input}
+        Question: {question}
 
         Context:
         {context}
@@ -102,10 +98,11 @@ def create_rag_chain(llm, vectorstore):
         """
     )
     
-    retrieval_chain = create_retrieval_chain(
+    retrieval_chain = RetrievalQA.from_chain_type(
         llm=llm,
+        chain_type="stuff",
         retriever=vectorstore.as_retriever(),
-        document_prompt=prompt
+        chain_type_kwargs={"prompt": prompt}
     )
     logger.info("Created RAG chain with new prompt")
     return retrieval_chain
@@ -113,7 +110,7 @@ def create_rag_chain(llm, vectorstore):
 # Step 6: Query Function
 async def get_answer(query, retrieval_chain):
     try:
-        response = await asyncio.to_thread(retrieval_chain.run, {"question": query})
+        response = await asyncio.to_thread(retrieval_chain.run, query)
         logger.info(f"Generated response for query: {query}")
         return response
     except Exception as e:
@@ -135,15 +132,10 @@ async def get_answer_endpoint(query: Query):
         logger.error(f"Error processing query: {str(e)}")
         raise HTTPException(status_code=500, detail="An error occurred while processing your request")
 
-# Add root endpoint
+# Root endpoint
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the Interview Q&A API! Use the /get_answer endpoint to ask questions."}
-
-# Add favicon handling
-@app.get("/favicon.ico")
-async def favicon():
-    return FileResponse("path/to/your/favicon.ico")  # Update this path
 
 # Step 8: Main Execution
 if __name__ == "__main__":
@@ -166,3 +158,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"Critical error in main execution: {str(e)}")
         raise
+
+print("Script execution completed.")
