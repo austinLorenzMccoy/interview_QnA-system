@@ -1,5 +1,3 @@
-#interview_prep.py
-
 import os
 import logging
 import asyncio
@@ -34,6 +32,28 @@ class Message(BaseModel):
     role: MessageRole
     content: str
     timestamp: datetime = Field(default_factory=datetime.now)
+
+    @validator('content')
+    def clean_content(cls, v):
+        """Remove any role prefixes from the content."""
+        v = v.strip()
+        prefixes_to_remove = [
+            "MessageRole.ASSISTANT:",
+            "MessageRole.ASSISTANT",
+            "Assistant:",
+            "assistant:",
+            "ASSISTANT:",
+            "user:",
+            "USER:",
+            "system:",
+            "SYSTEM:"
+        ]
+        
+        for prefix in prefixes_to_remove:
+            if v.startswith(prefix):
+                v = v[len(prefix):].strip()
+                break
+        return v
 
 class ConversationState(BaseModel):
     messages: List[Message] = Field(default_factory=list)
@@ -100,7 +120,6 @@ class InterviewCoach:
                 {"Question": "What is the best way to answer Behavioral interview questions?", "Answer": "Employers are searching for a detailed explanation of a previous experience..."}
             ]
             
-            # Process and prepare the CSV data for use in the RAG system
             chunks = self.process_csv_data(csv_data)
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             self.vectorstore = FAISS.from_texts(chunks, embeddings)
@@ -144,6 +163,8 @@ class InterviewCoach:
         3. Focus on actionable advice
         4. Include quantifiable results when possible
 
+        Important: Provide your response directly without any role prefix or labels.
+
         Response:""")
 
         return RetrievalQA.from_chain_type(
@@ -153,11 +174,33 @@ class InterviewCoach:
             chain_type_kwargs={"prompt": prompt}
         )
 
+    def clean_response(self, response: str) -> str:
+        """Clean the response of any role prefixes or formatting artifacts."""
+        response = response.strip()
+        
+        # List of possible prefixes to remove
+        prefixes_to_remove = [
+            "MessageRole.ASSISTANT:",
+            "MessageRole.ASSISTANT",
+            "Assistant:",
+            "assistant:",
+            "ASSISTANT:",
+            "Response:",
+            "Answer:"
+        ]
+        
+        # Remove any matching prefix
+        for prefix in prefixes_to_remove:
+            if response.startswith(prefix):
+                response = response[len(prefix):].strip()
+                break
+                
+        return response
+
     async def generate_response(self, question: str, conversation_id: str) -> str:
         try:
             # Check if it's the first interaction in the conversation
             if conversation_id not in self.conversation_storage or len(self.conversation_storage[conversation_id].messages) == 0:
-                # First message: Provide an introductory response
                 intro_response = (
                     "Hello! I'm your interview coach. Feel free to ask me anything, "
                     "and I'll help you prepare for your upcoming interviews. "
@@ -167,13 +210,13 @@ class InterviewCoach:
                 self.add_message_to_conversation(conversation_id, MessageRole.ASSISTANT, intro_response)
                 return intro_response
 
-            # If there is context, proceed with generating a response based on it
             context = self.get_conversation_context(conversation_id)
             prompt = f"""Previous conversation context:
             {context}
 
             Current question: {question}
 
+            Important: Provide your response directly without any role prefix or labels.
             Please provide a response that takes into account the conversation history if relevant.
             If there is no relevant context, provide a direct answer to the question."""
             
@@ -186,10 +229,12 @@ class InterviewCoach:
             )
             
             response = chat_completion.choices[0].message.content
-            self.add_message_to_conversation(conversation_id, MessageRole.USER, question)
-            self.add_message_to_conversation(conversation_id, MessageRole.ASSISTANT, response)
+            cleaned_response = self.clean_response(response)
             
-            return response
+            self.add_message_to_conversation(conversation_id, MessageRole.USER, question)
+            self.add_message_to_conversation(conversation_id, MessageRole.ASSISTANT, cleaned_response)
+            
+            return cleaned_response
         except Exception as e:
             self.logger.error(f"Error generating response: {str(e)}")
             raise HTTPException(
@@ -203,14 +248,15 @@ class InterviewCoach:
         
         conversation = self.conversation_storage[conversation_id]
         recent_messages = conversation.messages[-context_window:]
-        return "\n".join([f"{msg.role}: {msg.content}" for msg in recent_messages])
+        return "\n".join([f"Previous {msg.role}: {msg.content}" for msg in recent_messages])
 
     def add_message_to_conversation(self, conversation_id: str, role: MessageRole, content: str):
         if conversation_id not in self.conversation_storage:
             self.conversation_storage[conversation_id] = ConversationState()
         
         conversation = self.conversation_storage[conversation_id]
-        conversation.messages.append(Message(role=role, content=content))
+        cleaned_content = Message(role=role, content=content).content  # Uses the clean_content validator
+        conversation.messages.append(Message(role=role, content=cleaned_content))
         conversation.last_activity = datetime.now()
 
     def clean_inactive_conversations(self):
@@ -235,7 +281,7 @@ async def ask_question(input: QuestionInput):
 @app.websocket("/ws/chat/{conversation_id}")
 async def websocket_chat(websocket: WebSocket, conversation_id: str):
     await websocket.accept()
-    await websocket.send_text(f"Welcome! Let's start preparing for your interview. Ask your first question.")
+    await websocket.send_text("Welcome! Let's start preparing for your interview. Ask your first question.")
     try:
         while True:
             message = await websocket.receive_text()
