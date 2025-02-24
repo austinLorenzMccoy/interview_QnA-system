@@ -31,6 +31,7 @@ venv/
 ENV/
 env/
 env.bak/
+interviewQNA_env/
 venv.bak/
 
 # PyInstaller
